@@ -2,60 +2,86 @@ import streamlit as st
 import fitz  # PyMuPDF
 import re
 
-# 1. Gemi Adamı Yeterlilik Hiyerarşisi (Makine Sınıfı)
-# Puan ne kadar yüksekse yeterlilik o kadar üst seviyededir.
-HIYERARSI = {
-    "Başmakinist": 10,
-    "Uzakyol Başmakinist": 11,
-    "İkinci Makinist": 8,
-    "Uzakyol İkinci Makinist": 9,
-    "Makinist": 6,
-    "Uzakyol Vardiya Makinisti": 7,
-    "Sınırlı Başmakinist": 5,
-    "Sınırlı Makinist": 4,
-    "Yağcı": 2,
-    "Silici": 1
+# 1. Senin verdiğin listeye göre unvan hiyerarşisi (Puanı yüksek olan en kıdemlidir)
+# Bu liste, cüzdanda yazabilecek anahtar kelimeleri kapsar.
+UNVAN_HIYERARSI = {
+    "Çarkçıbaşı": 100,
+    "Başmakinist": 100,
+    "Chief Engineer": 100,
+    "2. Çarkçı": 80,
+    "2. Makinist": 80,
+    "Second Engineer": 80,
+    "3. Çarkçı": 60,
+    "3. Makinist": 60,
+    "Third Engineer": 60,
+    "4. Çarkçı": 40,
+    "4. Makinist": 40,
+    "Fourth Engineer": 40,
+    "Elektrik Zabiti": 50, # Genelde 3. veya 4. çarkçı seviyesinde değerlendirilir
+    "Elektrik Çarkçısı": 50,
+    "Makine Lostromosu": 30,
+    "Motorman": 30,
+    "Yağcı": 20,
+    "Oiler": 20,
+    "Silici": 10,
+    "Wiper": 10
 }
 
-def yeterlilik_analizi(text):
-    bulunanlar = []
-    for unvan in HIYERARSI.keys():
-        # Metin içinde büyük/küçük harf duyarsız arama yapar
-        if re.search(unvan, text, re.IGNORECASE):
-            bulunanlar.append(unvan)
+def analiz_et(metin):
+    tespit_edilenler = []
     
-    if not bulunanlar:
-        return None, None
-
-    # Bulunanlar içinden puanı en yüksek olanı seç
-    en_yuksek = max(bulunanlar, key=lambda x: HIYERARSI[x])
-    return en_yuksek, HIYERARSI[en_yuksek]
+    # Metni temizle ve unvanları ara
+    for unvan, puan in UNVAN_HIYERARSI.items():
+        # Regex ile tam kelime araması yapalım (Case insensitive)
+        if re.search(r'\b' + re.escape(unvan) + r'\b', metin, re.IGNORECASE):
+            tespit_edilenler.append((unvan, puan))
+    
+    if not tespit_edilenler:
+        return None
+    
+    # Puanı en yüksek olanı seç (Kıdemli olan)
+    en_yuksek = max(tespit_edilenler, key=lambda x: x[1])
+    return en_yuksek
 
 # --- Streamlit Arayüzü ---
-st.set_page_config(page_title="Gemi Adamı Cüzdan Analizi", layout="centered")
+st.set_page_config(page_title="Makine Personeli Analiz", page_icon="⚙️")
 
-st.title("🚢 Gemi Adamı Cüzdan Analiz Sistemi")
-st.write("PDF cüzdanı yükleyin, sistem en yüksek yeterliliği otomatik tespit etsin.")
+st.title("🚢 Çarkçı Yeterlilik Analiz Sistemi")
+st.markdown("""
+Bu uygulama, yüklenen PDF cüzdanlarındaki unvanları tarar ve personel arasındaki **en yüksek yeterliliği** belirler.
+""")
 
-uploaded_file = st.file_uploader("Cüzdan PDF'ini Yükleyin", type="pdf")
+dosya = st.file_uploader("Personel Cüzdanı (PDF)", type="pdf")
 
-if uploaded_file is not None:
-    with st.spinner('Dosya işleniyor...'):
-        # PDF'i oku
-        doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-        full_text = ""
-        for page in doc:
-            full_text += page.get_text()
-        
-        # Analiz et
-        sonuc, puan = yeterlilik_analizi(full_text)
-        
-        if sonuc:
-            st.success(f"### Tespit Edilen En Yüksek Yeterlilik: **{sonuc}**")
-            st.info(f"Sistem Hiyerarşi Puanı: {puan}")
+if dosya:
+    try:
+        with st.spinner('Cüzdan taranıyor...'):
+            # PDF Okuma
+            doc = fitz.open(stream=dosya.read(), filetype="pdf")
+            tam_metin = ""
+            for sayfa in doc:
+                tam_metin += sayfa.get_text()
             
-            # Detaylı metin görmek istersen (Debug için)
-            with st.expander("PDF İçeriğini Görüntüle"):
-                st.text(full_text)
-        else:
-            st.warning("PDF içerisinde geçerli bir yeterlilik unvanı bulunamadı.")
+            # Analiz
+            sonuc = analiz_et(tam_metin)
+            
+            if sonuc:
+                unvan_adi, puan = sonuc
+                st.balloons()
+                st.success(f"### Tespit Edilen En Üst Unvan: **{unvan_adi}**")
+                
+                # Görsel bir hiyerarşi barı
+                st.progress(puan / 100)
+                st.caption(f"Hiyerarşi Seviyesi: {puan}/100")
+            else:
+                st.error("Üzgünüm, PDF içerisinde tanımlı bir unvan (Çarkçı, Yağcı vb.) bulunamadı.")
+                
+            with st.expander("PDF'den Çıkarılan Ham Metni Gör"):
+                st.text(tam_metin)
+                
+    except Exception as e:
+        st.error(f"Bir hata oluştu: {e}")
+
+# --- Footer ---
+st.divider()
+st.info("Not: Bu sistem anahtar kelime eşleşmesi ile çalışır. El yazısı olan belgelerde OCR (Tesseract) gerekebilir.")
